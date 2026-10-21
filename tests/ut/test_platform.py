@@ -1,4 +1,5 @@
 import importlib
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -2608,3 +2609,56 @@ class TestNPUPlatform(TestBase):
             self.platform.get_static_graph_wrapper_cls(),
             "vllm_ascend.compilation.acl_graph.ACLGraphWrapper",
         )
+
+
+def _mk_model_dir(tmp_path, cfg_mode=None, dec_mode=None):
+    d = tmp_path / "model"
+    d.mkdir()
+    if cfg_mode is not None:
+        (d / "config.json").write_text(json.dumps({"jev_prompt_attention": cfg_mode}))
+    else:
+        (d / "config.json").write_text("{}")
+    if dec_mode is not None:
+        (d / "decision_config.json").write_text(json.dumps({"prompt_attention": dec_mode}))
+    return str(d)
+
+
+class TestStartLuxPromptAttentionGuard:
+    def _vc(self, model):
+        return SimpleNamespace(model_config=SimpleNamespace(model=model))
+
+    def test_non_local_model_skips(self):
+        from vllm_ascend.platform import _validate_startlux_prompt_attention
+
+        _validate_startlux_prompt_attention(self._vc("org/repo-id"))
+        _validate_startlux_prompt_attention(self._vc("/definitely/not/here"))
+
+    def test_causal_folder_skips(self, tmp_path):
+        from vllm_ascend.platform import _validate_startlux_prompt_attention
+
+        d = _mk_model_dir(tmp_path, cfg_mode=None, dec_mode="causal")
+        _validate_startlux_prompt_attention(self._vc(d))
+
+    def test_instant_without_env_raises(self, tmp_path, monkeypatch):
+        from vllm_ascend.platform import _validate_startlux_prompt_attention
+
+        monkeypatch.delenv("STARTLUX_PREFIX_BIDIR", raising=False)
+        monkeypatch.delenv("VLLM_ASCEND_STARTLUX_PREFIX_BIDIR", raising=False)
+        d = _mk_model_dir(tmp_path, cfg_mode="bidirectional")
+        with pytest.raises(RuntimeError, match="bidirectional"):
+            _validate_startlux_prompt_attention(self._vc(d))
+
+    def test_instant_with_env_passes(self, tmp_path, monkeypatch):
+        from vllm_ascend.platform import _validate_startlux_prompt_attention
+
+        monkeypatch.setenv("STARTLUX_PREFIX_BIDIR", "1")
+        d = _mk_model_dir(tmp_path, cfg_mode="bidirectional", dec_mode="bidirectional")
+        _validate_startlux_prompt_attention(self._vc(d))
+        monkeypatch.delenv("STARTLUX_PREFIX_BIDIR")
+
+    def test_mismatched_modes_raise(self, tmp_path):
+        from vllm_ascend.platform import _validate_startlux_prompt_attention
+
+        d = _mk_model_dir(tmp_path, cfg_mode="bidirectional", dec_mode="causal")
+        with pytest.raises(RuntimeError, match="inconsistent"):
+            _validate_startlux_prompt_attention(self._vc(d))

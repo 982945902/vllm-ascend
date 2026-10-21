@@ -285,11 +285,9 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
         if self.speculative_config:
             spec_token_num = self.speculative_config.num_speculative_tokens
             self.decode_threshold += spec_token_num
-            assert self.decode_threshold <= 16, (
-                f"decode_threshold exceeded \
+            assert self.decode_threshold <= 16, f"decode_threshold exceeded \
                 npu_fused_infer_attention_score TND layout's limit of 16, \
                 got {self.decode_threshold}"
-            )
 
         self.reorder_batch_threshold = self.decode_threshold
 
@@ -654,6 +652,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
         self._use_max_workspace_for_fia_graph = self._use_layer_aware_fia_graph_replay
         self.sinks = sinks
         self.layerIndex = 0
+        # Hamming sparse was removed by the kvcomp refactor but the FIA fast-path
+        # gate below still references the attribute; keep it off by default.
+        self.enable_hamming_sparse = False
         # Some mixed-attention models cannot rely on the iteration order of
         # attn_metadata during graph replay. Record the captured layer name only
         # for that path.
@@ -1721,9 +1722,9 @@ class AscendC8AttentionBackendImpl(AscendAttentionBackendImpl):
 
         if num_decode_tokens > 0:
             num_block, block_size, _, _ = self.key_cache.shape  # type: ignore[attr-defined]
-            assert block_size % 32 == 0, (
-                f"C8 INT8 KV cache requires block_size to be a multiple of 32, got {block_size}"
-            )
+            assert (
+                block_size % 32 == 0
+            ), f"C8 INT8 KV cache requires block_size to be a multiple of 32, got {block_size}"
             kv_k = self._nz_5d_view(self.key_cache, block_size)
             kv_v = self._nz_5d_view(self.value_cache, block_size)
 

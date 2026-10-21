@@ -548,6 +548,7 @@ class NPUModelRunner(GPUModelRunner):
         is_profile: bool = False,
         context_len: int = 0,
         valid_dummy_state_slots: bool = False,
+        **_kwargs,  # [.179-v2qpm] absorb upstream-0.31-only kwargs (e.g. randomize_inputs)
     ):
         self._cpp_execution_time_ms = None
         profiling_config = self.ascend_config.scheduler_config.profiling_chunk_config

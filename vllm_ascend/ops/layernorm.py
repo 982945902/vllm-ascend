@@ -88,12 +88,14 @@ class AscendRMSNorm(RMSNorm):
         import torch_npu
 
         if residual is not None:
-            import vllm_ascend.vllm_ascend_C  # type: ignore[import-untyped]  # noqa: F401, PLC0415
-
-            enable_custom_op()
-            x, _, residual = torch.ops._C_ascend.npu_add_rms_norm_bias(
-                x, residual, self.weight, self.bias, self.variance_epsilon
-            )
+            # [.179-v2qpm] C ext unavailable on this box: decompose into
+            # native torch_npu ops (add -> rms_norm -> bias). Cast to the
+            # weight dtype first: npu_rms_norm rejects mixed dtypes
+            # (residual is fp32 in the V2 runner path).
+            x = (x + residual).to(self.weight.dtype)
+            x, residual = torch_npu.npu_rms_norm(x, self.weight, self.variance_epsilon)
+            if self.bias_loaded:
+                x = x + self.bias
             return x, residual
 
         x, residual = torch_npu.npu_rms_norm(x, self.weight, self.variance_epsilon)

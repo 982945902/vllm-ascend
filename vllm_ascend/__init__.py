@@ -116,3 +116,22 @@ def register_model():
 
 
 import vllm_ascend.logger  # noqa: E402, F401
+
+
+def _install_startlux_prefix_bidirectional():
+    # Opt-in StartLux-Decision prompt-bidirectional attention (Instant folders
+    # with config.json "jev_prompt_attention": "bidirectional"). No-op for any
+    # other folder or when the flags are unset.
+    import os
+
+    if os.environ.get("STARTLUX_PREFIX_BIDIR") != "1":
+        from vllm_ascend import envs
+
+        if not envs.VLLM_ASCEND_STARTLUX_PREFIX_BIDIR:
+            return
+    from vllm_ascend.attention import prefix_bidirectional
+
+    prefix_bidirectional.install()
+
+
+_install_startlux_prefix_bidirectional()

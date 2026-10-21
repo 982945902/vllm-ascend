@@ -87,6 +87,12 @@ env_variables: dict[str, Callable[[], Any]] = {
     # (safe for Ascend 910B/A3). Set to a positive value to override when
     # auto-detection is unavailable or for debugging UB overflow issues.
     "VLLM_ASCEND_ROPE_UB_SIZE_KB": lambda: int(os.getenv("VLLM_ASCEND_ROPE_UB_SIZE_KB") or 0),
+    # Enable the StartLux-Decision prompt-bidirectional attention patch.
+    # Activates only for model folders whose config.json declares
+    # "jev_prompt_attention": "bidirectional"; all other folders run stock.
+    # Equivalent to the upstream plugin flag STARTLUX_PREFIX_BIDIR=1.
+    # Default: 0 (disabled). Not sensitive.
+    "VLLM_ASCEND_STARTLUX_PREFIX_BIDIR": lambda: _strict_binary_env("VLLM_ASCEND_STARTLUX_PREFIX_BIDIR"),
 }
 
 # end-env-vars-definition

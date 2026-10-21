@@ -433,9 +433,9 @@ class NPUPlatform(Platform):
                 cache_config.mamba_block_size = cache_config.block_size
             else:
                 # mamba_block_size must be a multiple of block_size, so that it can hand the block hash
-                assert cache_config.mamba_block_size % cache_config.block_size == 0, (
-                    f"mamba_block_size must be a multiple of block_size: {cache_config.block_size}"
-                )
+                assert (
+                    cache_config.mamba_block_size % cache_config.block_size == 0
+                ), f"mamba_block_size must be a multiple of block_size: {cache_config.block_size}"
 
     @classmethod
     def _validate_indexer_pp_config(cls, vllm_config: VllmConfig) -> None:
@@ -509,6 +509,7 @@ class NPUPlatform(Platform):
         _validate_model_runner_config(vllm_config)
         cls._validate_indexer_pp_config(vllm_config)
 
+        _validate_startlux_prompt_attention(vllm_config)
         _validate_routing_replay_config(vllm_config)
         _validate_pcp_dcp_config(vllm_config)
         _validate_draft_decode_context_parallel_config(vllm_config)
@@ -1937,4 +1938,45 @@ def _validate_draft_decode_context_parallel_config(vllm_config: VllmConfig) -> N
             "be divisible by dcp world size when enable decode context "
             f"parallel for GQA draft model "
             f"({decode_context_parallel_size})."
+        )
+
+
+def _validate_startlux_prompt_attention(vllm_config: VllmConfig) -> None:
+    """Refuse to run a StartLux-Decision Instant folder causally.
+
+    Instant folders carry "jev_prompt_attention": "bidirectional" in config.json
+    (mirrored by "prompt_attention" in decision_config.json): their prompts must
+    be read with bidirectional full attention. A causal engine does not fail --
+    it silently produces wrong answers, so this check runs unconditionally
+    (before any opt-in gate) and raises unless the prefix-bidirectional patch
+    is enabled.
+    """
+    import json
+
+    model = getattr(vllm_config.model_config, "model", None)
+    if not isinstance(model, str) or not os.path.isdir(model):
+        return
+    modes = []
+    for name, key in (("config.json", "jev_prompt_attention"), ("decision_config.json", "prompt_attention")):
+        try:
+            with open(os.path.join(model, name)) as f:
+                mode = json.load(f).get(key)
+        except (OSError, ValueError):
+            continue
+        if mode:
+            modes.append(mode)
+    if not modes or "bidirectional" not in modes:
+        return
+    if len(set(modes)) != 1:
+        raise RuntimeError(
+            f"[StartLux] {model}: config.json jev_prompt_attention and decision_config.json "
+            f"prompt_attention disagree ({modes}); the folder is inconsistent."
+        )
+    from vllm_ascend.attention.prefix_bidirectional import ENV, ENV_ASCEND, enabled
+
+    if not enabled():
+        raise RuntimeError(
+            f"[StartLux] {model} is an Instant folder and reads its prompt bidirectionally, "
+            f"but prefix-bidirectional attention is off: set {ENV}=1 or {ENV_ASCEND}=1. "
+            "Running it causally is silently wrong (top-1 agreement ~88%)."
         )

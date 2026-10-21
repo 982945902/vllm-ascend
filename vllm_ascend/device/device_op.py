@@ -849,8 +849,15 @@ class BaseDeviceAdaptor:
 
     @staticmethod
     def npu_gemma_rms_norm(x, weight, variance_epsilon):
-        x, _ = torch.ops._C_ascend.npu_gemma_rms_norm(x, weight, variance_epsilon)
-        return x
+        from vllm_ascend.utils import enable_custom_op
+
+        if enable_custom_op():
+            x, _ = torch.ops._C_ascend.npu_gemma_rms_norm(x, weight, variance_epsilon)
+            return x
+        # [startlux-vendor] torch_npu fallback when the custom-op extension is
+        # absent: GemmaRMSNorm applies (1 + weight) scaling.
+        out, _ = torch_npu.npu_rms_norm(x, 1.0 + weight, variance_epsilon)
+        return out
 
     @staticmethod
     def fla_gdn_prefill(
